@@ -168,9 +168,26 @@ def generate_username_variants(first: str, last: str) -> list[str]:
 # Full person scan orchestrator
 # ---------------------------------------------------------------------------
 
-def scan_person(first: str, last: str) -> None:
+def scan_person(first: str, last: str, use_cache: bool = True) -> dict[str, Any]:
+    from .cache import get_cache
+    key = f"{first.lower()} {last.lower()}"
     console.print(f"\n[bold white]Target:[/bold white] [bold green]{first} {last}[/bold green]")
-    generate_dorks(first, last)
-    generate_username_variants(first, last)
-    check_gravatar_permutations(first, last)
-    lookup_dehashed(first, last)
+
+    cache = get_cache()
+    if use_cache:
+        cached = cache.get("person", key)
+        if cached:
+            console.print("  [dim cyan][cache hit — use --no-cache to refresh][/dim cyan]")
+            return cached
+
+    result: dict[str, Any] = {
+        "dorks":             generate_dorks(first, last),
+        "username_variants": generate_username_variants(first, last),
+        "gravatar_found":    check_gravatar_permutations(first, last),
+        "dehashed":          lookup_dehashed(first, last),
+    }
+
+    if use_cache:
+        cache.set("person", key, result)
+
+    return result

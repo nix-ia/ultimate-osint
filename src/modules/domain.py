@@ -331,16 +331,39 @@ def lookup_ip_geo(ip_or_domain: str) -> dict[str, Any]:
 # Full domain scan orchestrator
 # ---------------------------------------------------------------------------
 
-def scan_domain(target: str) -> None:
+def scan_domain(target: str, use_cache: bool = True) -> dict[str, Any]:
+    from .cache import get_cache
     domain = extract_domain(target)
     console.print(f"\n[bold white]Target:[/bold white] [bold green]{domain}[/bold green]")
 
-    lookup_whois(domain)
-    lookup_dns(domain)
-    lookup_crtsh(domain)
-    lookup_wayback(domain)
-    lookup_ip_geo(domain)
-    lookup_shodan(domain)
-    lookup_virustotal(domain)
-    lookup_hunter(domain)
-    lookup_urlscan(domain)
+    cache = get_cache()
+    if use_cache:
+        cached = cache.get("domain", domain)
+        if cached:
+            console.print("  [dim cyan][cache hit — use --no-cache to refresh][/dim cyan]")
+            # Re-print key findings from cache
+            for section, data in cached.items():
+                if isinstance(data, dict) and data:
+                    print_section(section, "yellow")
+                    for k, v in data.items():
+                        print_result(k, v)
+                elif isinstance(data, list) and data:
+                    print_section(section, "yellow")
+                    print_result("results", data)
+            return cached
+
+    result: dict[str, Any] = {}
+    result["whois"]     = lookup_whois(domain)
+    result["dns"]       = lookup_dns(domain)
+    result["crtsh"]     = {"subdomains": lookup_crtsh(domain)}
+    result["wayback"]   = lookup_wayback(domain)
+    result["ip_geo"]    = lookup_ip_geo(domain)
+    result["shodan"]    = lookup_shodan(domain)
+    result["virustotal"]= lookup_virustotal(domain)
+    result["hunter"]    = {"emails": lookup_hunter(domain)}
+    result["urlscan"]   = {"results": [r.get("page", {}).get("url") for r in lookup_urlscan(domain)]}
+
+    if use_cache:
+        cache.set("domain", domain, result)
+
+    return result

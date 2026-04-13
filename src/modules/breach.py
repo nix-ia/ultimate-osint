@@ -99,7 +99,24 @@ def lookup_hibp_pastes(email: str) -> list[dict]:
         return []
 
 
-def scan_breach(email: str) -> None:
+def scan_breach(email: str, use_cache: bool = True) -> dict[str, Any]:
+    from .cache import get_cache
     console.print(f"\n[bold white]Target:[/bold white] [bold red]{email}[/bold red]")
-    lookup_hibp(email)
-    lookup_hibp_pastes(email)
+
+    cache = get_cache()
+    if use_cache:
+        cached = cache.get("breach", email)
+        if cached:
+            console.print("  [dim cyan][cache hit — use --no-cache to refresh][/dim cyan]")
+            return cached
+
+    result: dict[str, Any] = {
+        "breaches": lookup_hibp(email),
+        "pastes":   lookup_hibp_pastes(email),
+    }
+
+    if use_cache:
+        # Breach data — shorter TTL (6h) since it can change
+        cache.set("breach", email, result, ttl=21600)
+
+    return result

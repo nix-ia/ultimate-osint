@@ -47,7 +47,7 @@ def parse_phone_local(number: str) -> dict[str, Any]:
             "country": geocoder.description_for_number(parsed, "en"),
             "carrier": carrier.name_for_number(parsed, "en"),
             "timezones": list(timezone.time_zones_for_number(parsed)),
-            "line_type": phonenumbers.PhoneNumberType(phonenumbers.number_type(parsed)).name,
+            "line_type": phonenumbers.PhoneNumberType.to_string(phonenumbers.number_type(parsed)),
         }
 
         for k, v in data.items():
@@ -148,9 +148,25 @@ def lookup_opencnam(number: str) -> None:
 # Full phone scan orchestrator
 # ---------------------------------------------------------------------------
 
-def scan_phone(number: str) -> None:
+def scan_phone(number: str, use_cache: bool = True) -> dict[str, Any]:
+    from .cache import get_cache
     console.print(f"\n[bold white]Target:[/bold white] [bold magenta]{number}[/bold magenta]")
-    parse_phone_local(number)
-    lookup_numverify(number)
-    lookup_abstractapi(number)
-    lookup_opencnam(number)
+
+    cache = get_cache()
+    if use_cache:
+        cached = cache.get("phone", number)
+        if cached:
+            console.print("  [dim cyan][cache hit — use --no-cache to refresh][/dim cyan]")
+            for k, v in cached.items():
+                print_result(k, v)
+            return cached
+
+    result: dict[str, Any] = {}
+    result.update(parse_phone_local(number))
+    result["numverify"]   = lookup_numverify(number)
+    result["abstractapi"] = lookup_abstractapi(number)
+
+    if use_cache:
+        cache.set("phone", number, result)
+
+    return result
