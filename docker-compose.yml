@@ -1,0 +1,16 @@
+services:
+  osint:
+    build:
+      context: .
+      network: host
+    container_name: ultimate-osint
+    ports:
+      - "0.0.0.0:8888:8888"
+    env_file:
+      - .env
+    volumes:
+      - osint-cache:/root/.cache/ultimate-osint
+    restart: unless-stopped
+
+volumes:
+  osint-cache:

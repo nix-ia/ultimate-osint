@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Ultimate OSINT</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+
+<header>
+  <div id="header-left">
+    <span id="logo">&#9679; ULTIMATE OSINT</span>
+    <span id="tagline">Passive Intelligence Gathering</span>
+  </div>
+  <div id="header-right">
+    <div id="api-keys">
+      {% for key, active in api_keys.items() %}
+      <span class="key-badge {{ 'active' if active else 'inactive' }}" title="{{ key }}">
+        {{ key.replace('_API_KEY','').replace('_KEY','') }}
+      </span>
+      {% endfor %}
+    </div>
+    <button id="cache-btn" title="Cache stats">&#128190; Cache</button>
+  </div>
+</header>
+
+<div id="layout">
+
+  <!-- ===== PANEL GAUCHE : formulaire ===== -->
+  <aside id="panel">
+
+    <!-- Onglets modules -->
+    <div id="tabs">
+      <button class="tab active" data-tab="domain">Domain</button>
+      <button class="tab" data-tab="phone">Phone</button>
+      <button class="tab" data-tab="username">Username</button>
+      <button class="tab" data-tab="person">Person</button>
+      <button class="tab" data-tab="breach">Breach</button>
+      <button class="tab tab-full" data-tab="full">Full ⚡</button>
+    </div>
+
+    <!-- Domain -->
+    <form id="form-domain" class="scan-form active" data-module="domain">
+      <div class="field">
+        <label>Domain / URL</label>
+        <input type="text" name="target" placeholder="example.com" required autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-label">
+          <input type="checkbox" name="no_cache"/> Force refresh
+        </label>
+      </div>
+      <button type="submit" class="btn-scan">Scan Domain</button>
+    </form>
+
+    <!-- Phone -->
+    <form id="form-phone" class="scan-form" data-module="phone">
+      <div class="field">
+        <label>Phone number (E.164)</label>
+        <input type="text" name="number" placeholder="+33612345678" required autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-label">
+          <input type="checkbox" name="no_cache"/> Force refresh
+        </label>
+      </div>
+      <button type="submit" class="btn-scan">Scan Phone</button>
+    </form>
+
+    <!-- Username -->
+    <form id="form-username" class="scan-form" data-module="username">
+      <div class="field">
+        <label>Username</label>
+        <input type="text" name="username" placeholder="johndoe" required autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-label">
+          <input type="checkbox" name="no_cache"/> Force refresh
+        </label>
+      </div>
+      <button type="submit" class="btn-scan">Hunt Username</button>
+    </form>
+
+    <!-- Person -->
+    <form id="form-person" class="scan-form" data-module="person">
+      <div class="field">
+        <label>First name</label>
+        <input type="text" name="first" placeholder="John" required autocomplete="off"/>
+      </div>
+      <div class="field">
+        <label>Last name</label>
+        <input type="text" name="last" placeholder="Doe" required autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-label">
+          <input type="checkbox" name="no_cache"/> Force refresh
+        </label>
+      </div>
+      <button type="submit" class="btn-scan">Investigate Person</button>
+    </form>
+
+    <!-- Breach -->
+    <form id="form-breach" class="scan-form" data-module="breach">
+      <div class="field">
+        <label>Email address</label>
+        <input type="email" name="email" placeholder="target@example.com" required autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-label">
+          <input type="checkbox" name="no_cache"/> Force refresh
+        </label>
+      </div>
+      <button type="submit" class="btn-scan">Check Breaches</button>
+    </form>
+
+    <!-- Full -->
+    <form id="form-full" class="scan-form" data-module="full">
+      <div class="field">
+        <label>Domain / URL <span class="req">*</span></label>
+        <input type="text" name="target" placeholder="example.com" required autocomplete="off"/>
+      </div>
+      <div class="field">
+        <label>Username <span class="opt">optional</span></label>
+        <input type="text" name="username" placeholder="johndoe" autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <div class="field" style="flex:1">
+          <label>First name <span class="opt">optional</span></label>
+          <input type="text" name="first" placeholder="John" autocomplete="off"/>
+        </div>
+        <div class="field" style="flex:1">
+          <label>Last name <span class="opt">optional</span></label>
+          <input type="text" name="last" placeholder="Doe" autocomplete="off"/>
+        </div>
+      </div>
+      <div class="field">
+        <label>Phone <span class="opt">optional</span></label>
+        <input type="text" name="phone" placeholder="+33612345678" autocomplete="off"/>
+      </div>
+      <div class="field">
+        <label>Email <span class="opt">optional</span></label>
+        <input type="email" name="email" placeholder="target@example.com" autocomplete="off"/>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-label">
+          <input type="checkbox" name="no_cache"/> Force refresh
+        </label>
+      </div>
+      <button type="submit" class="btn-scan btn-full">Full OSINT Sweep ⚡</button>
+    </form>
+
+    <!-- Historique -->
+    <div id="history-block">
+      <div id="history-title">Recent scans</div>
+      <div id="history-list"></div>
+    </div>
+
+  </aside>
+
+  <!-- ===== PANEL DROIT : résultats ===== -->
+  <main id="results">
+    <div id="results-placeholder">
+      <div id="placeholder-icon">&#9679;</div>
+      <div id="placeholder-text">Enter a target and launch a scan</div>
+    </div>
+    <div id="results-content" style="display:none"></div>
+  </main>
+
+</div>
+
+<!-- Modal cache -->
+<div id="cache-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-title">&#128190; Cache</div>
+    <div id="cache-stats-content">Loading...</div>
+    <div class="modal-actions">
+      <button id="cache-clear-btn" class="btn-danger">Clear all</button>
+      <button id="cache-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
