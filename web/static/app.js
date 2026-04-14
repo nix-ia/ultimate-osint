@@ -40,10 +40,14 @@ document.querySelectorAll(".scan-form").forEach(form => {
 });
 
 // ===== SCAN ENGINE =====
-let currentES = null;
+let currentES           = null;
+let currentHistoryEntry = null;
+let currentSectionData  = {};
 
 function launchScan(module, params) {
   if (currentES) { currentES.close(); currentES = null; }
+  currentSectionData  = {};
+  currentHistoryEntry = null;
 
   const qs  = new URLSearchParams(params).toString();
   const url = `/stream/${module}?${qs}`;
@@ -63,7 +67,7 @@ function launchScan(module, params) {
 
     if (msg.type === "start") {
       setStatus("running", `Target: ${msg.target}`);
-      addToHistory(module, msg.target);
+      currentHistoryEntry = addToHistory(module, msg.target);
     }
     else if (msg.type === "cache_hit") {
       setStatus("cache", `Cache hit — ${msg.target}`);
@@ -76,6 +80,7 @@ function launchScan(module, params) {
       if (!sections[name]) sections[name] = createSection(name, "done");
       else updateSectionStatus(sections[name], "done");
       renderResult(sections[name], name, msg.data);
+      currentSectionData[name] = msg.data;
     }
     else if (msg.type === "error") {
       const name = msg.name;
@@ -84,6 +89,11 @@ function launchScan(module, params) {
       renderError(sections[name], msg.msg);
     }
     else if (msg.type === "done") {
+      // Save full results in history entry
+      if (currentHistoryEntry && Object.keys(currentSectionData).length > 0) {
+        currentHistoryEntry.sectionData = { ...currentSectionData };
+        renderHistory();
+      }
       setStatus("done", buildSummary(msg.summary));
       es.close(); currentES = null;
       document.querySelectorAll(".btn-scan").forEach(b => b.disabled = false);
@@ -118,7 +128,10 @@ function setStatus(state, text) {
     document.getElementById("results-content").prepend(bar);
   }
   const cls = state === "running" ? "running" : state === "done" ? "done" : state === "cache" ? "done" : "error";
-  bar.innerHTML = `<div id="status-dot" class="${cls}"></div><span>${text}</span>`;
+  const pdfBtn = (state === "done" || state === "cache")
+    ? `<button class="pdf-btn" onclick="window.print()">&#128438; PDF</button>`
+    : "";
+  bar.innerHTML = `<div id="status-dot" class="${cls}"></div><span>${text}</span>${pdfBtn}`;
 }
 
 function createSection(name, status) {
@@ -306,9 +319,11 @@ function renderPerson(data) {
 const history = [];
 
 function addToHistory(module, target) {
-  history.unshift({ module, target, ts: Date.now() });
+  const entry = { module, target, ts: Date.now(), sectionData: null };
+  history.unshift(entry);
   if (history.length > 10) history.pop();
   renderHistory();
+  return entry;
 }
 
 function renderHistory() {
@@ -316,7 +331,10 @@ function renderHistory() {
   list.innerHTML = history.map((h, i) =>
     `<div class="history-item" onclick="replayScan(${i})">
       <span class="history-target">${h.target}</span>
-      <span class="history-module">${h.module}</span>
+      <div style="display:flex;gap:5px;align-items:center">
+        ${h.sectionData ? '<span class="history-dot" title="Results saved">&#9679;</span>' : ''}
+        <span class="history-module">${h.module}</span>
+      </div>
     </div>`
   ).join("");
 }
@@ -324,12 +342,27 @@ function renderHistory() {
 function replayScan(idx) {
   const h = history[idx];
   if (!h) return;
+
+  // Switch to the right tab
   const tab = document.querySelector(`.tab[data-tab="${h.module}"]`);
   if (tab) tab.click();
+
+  // Fill first input
   const form = document.getElementById("form-" + h.module);
   if (form) {
     const input = form.querySelector("input[type=text], input[type=email]");
-    if (input) { input.value = h.target; input.focus(); }
+    if (input) input.value = h.target;
+  }
+
+  // Restore full results from saved data
+  if (h.sectionData && Object.keys(h.sectionData).length > 0) {
+    showResults();
+    clearResults();
+    setStatus("done", `${h.target} — restored`);
+    for (const [name, data] of Object.entries(h.sectionData)) {
+      const sec = createSection(name, "done");
+      renderResult(sec, name, data);
+    }
   }
 }
 
