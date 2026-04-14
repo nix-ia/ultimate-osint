@@ -8,13 +8,33 @@ document.querySelectorAll(".tab").forEach(tab => {
   });
 });
 
+// ===== TOOLS TOGGLE =====
+function toggleTools(header) {
+  const grid  = header.nextElementSibling;
+  const arrow = header.querySelector(".tools-arrow");
+  const collapsed = grid.style.display === "none";
+  grid.style.display  = collapsed ? "" : "none";
+  arrow.innerHTML     = collapsed ? "&#9660;" : "&#9654;";
+}
+
 // ===== FORMS =====
 document.querySelectorAll(".scan-form").forEach(form => {
   form.addEventListener("submit", e => {
     e.preventDefault();
     const module = form.dataset.module;
-    const data = Object.fromEntries(new FormData(form).entries());
+    const fd     = new FormData(form);
+    const data   = Object.fromEntries(fd.entries());
+
+    // Force-refresh flag
     data.no_cache = form.querySelector("[name=no_cache]")?.checked ? "1" : "0";
+
+    // Collect checked tools (only pass if not all checked)
+    const allCbs     = [...form.querySelectorAll(".tool-cb")];
+    const checkedCbs = allCbs.filter(cb => cb.checked);
+    if (allCbs.length > 0 && checkedCbs.length < allCbs.length && checkedCbs.length > 0) {
+      data.tools = checkedCbs.map(cb => cb.value).join(",");
+    }
+
     launchScan(module, data);
   });
 });
@@ -25,12 +45,14 @@ let currentES = null;
 function launchScan(module, params) {
   if (currentES) { currentES.close(); currentES = null; }
 
-  const qs = new URLSearchParams(params).toString();
+  const qs  = new URLSearchParams(params).toString();
   const url = `/stream/${module}?${qs}`;
 
   showResults();
   clearResults();
-  setStatus("running", `Scanning ${params.target || params.number || params.username || params.email || (params.first + " " + params.last)}...`);
+  const label = params.target || params.ip || params.email || params.number || params.username
+              || (params.first ? `${params.first} ${params.last}` : "");
+  setStatus("running", `Scanning ${label}...`);
 
   const es = new EventSource(url);
   currentES = es;
@@ -43,46 +65,37 @@ function launchScan(module, params) {
       setStatus("running", `Target: ${msg.target}`);
       addToHistory(module, msg.target);
     }
-
     else if (msg.type === "cache_hit") {
       setStatus("cache", `Cache hit — ${msg.target}`);
     }
-
     else if (msg.type === "section") {
       sections[msg.name] = createSection(msg.name, "running");
     }
-
     else if (msg.type === "result") {
       const name = msg.name;
       if (!sections[name]) sections[name] = createSection(name, "done");
       else updateSectionStatus(sections[name], "done");
       renderResult(sections[name], name, msg.data);
     }
-
     else if (msg.type === "error") {
       const name = msg.name;
       if (!sections[name]) sections[name] = createSection(name, "error");
       else updateSectionStatus(sections[name], "error");
       renderError(sections[name], msg.msg);
     }
-
     else if (msg.type === "done") {
       setStatus("done", buildSummary(msg.summary));
-      es.close();
-      currentES = null;
-      // Activer les boutons
+      es.close(); currentES = null;
       document.querySelectorAll(".btn-scan").forEach(b => b.disabled = false);
     }
   };
 
   es.onerror = () => {
     setStatus("error", "Connection error");
-    es.close();
-    currentES = null;
+    es.close(); currentES = null;
     document.querySelectorAll(".btn-scan").forEach(b => b.disabled = false);
   };
 
-  // Désactiver les boutons pendant le scan
   document.querySelectorAll(".btn-scan").forEach(b => b.disabled = true);
 }
 
@@ -104,8 +117,8 @@ function setStatus(state, text) {
     bar.id = "status-bar";
     document.getElementById("results-content").prepend(bar);
   }
-  const dot = state === "running" ? "running" : state === "done" ? "done" : state === "cache" ? "done" : "error";
-  bar.innerHTML = `<div id="status-dot" class="${dot}"></div><span>${text}</span>`;
+  const cls = state === "running" ? "running" : state === "done" ? "done" : state === "cache" ? "done" : "error";
+  bar.innerHTML = `<div id="status-dot" class="${cls}"></div><span>${text}</span>`;
 }
 
 function createSection(name, status) {
@@ -113,7 +126,7 @@ function createSection(name, status) {
   el.className = "result-section";
   el.innerHTML = `
     <div class="section-head" onclick="toggleSection(this)">
-      <h3>${name.replace(/_/g," ")}</h3>
+      <h3>${name.replace(/_/g, " ")}</h3>
       <span class="section-status status-${status}">${status}</span>
     </div>
     <div class="section-body">
@@ -127,10 +140,7 @@ function createSection(name, status) {
 
 function updateSectionStatus(el, status) {
   const badge = el.querySelector(".section-status");
-  if (badge) {
-    badge.className = "section-status status-" + status;
-    badge.textContent = status;
-  }
+  if (badge) { badge.className = "section-status status-" + status; badge.textContent = status; }
 }
 
 function toggleSection(head) {
@@ -139,13 +149,16 @@ function toggleSection(head) {
 }
 
 function renderError(el, msg) {
-  el.querySelector(".section-body").innerHTML = `<span style="color:var(--red);font-size:12px">${msg}</span>`;
+  el.querySelector(".section-body").innerHTML =
+    `<span style="color:var(--red);font-size:12px">${msg}</span>`;
 }
 
 function buildSummary(summary) {
   if (!summary) return "Scan complete";
   if (summary.found !== undefined) return `Scan complete — ${summary.found} found / ${summary.total} checked`;
   if (summary.domain) return `Scan complete — ${summary.domain}`;
+  if (summary.ip)     return `Scan complete — ${summary.ip}`;
+  if (summary.email)  return `Scan complete — ${summary.email}`;
   return "Scan complete";
 }
 
@@ -154,34 +167,22 @@ function buildSummary(summary) {
 function renderResult(el, name, data) {
   const body = el.querySelector(".section-body");
 
-  if (name === "username") {
-    body.innerHTML = renderUsernameTable(data);
-    return;
-  }
-  if (name === "breach") {
-    body.innerHTML = renderBreachTable(data);
-    return;
-  }
-  if (name === "person") {
-    body.innerHTML = renderPerson(data);
-    return;
-  }
-  // Default: KV table
+  if (name === "username")    { body.innerHTML = renderUsernameTable(data); return; }
+  if (name === "hibp")        { body.innerHTML = renderBreachList(data);    return; }
+  if (name === "hibp_pastes") { body.innerHTML = renderPasteList(data);     return; }
+  if (name === "breach")      { body.innerHTML = renderBreachCompat(data);  return; }
+  if (name === "person")      { body.innerHTML = renderPerson(data);        return; }
+  if (name === "gravatar")    { body.innerHTML = renderGravatar(data);      return; }
   body.innerHTML = renderKV(data);
 }
 
 function renderKV(data) {
-  if (!data || (typeof data === "object" && Object.keys(data).length === 0)) {
+  if (!data || (typeof data === "object" && !Array.isArray(data) && Object.keys(data).length === 0))
     return `<span style="color:var(--muted);font-size:12px">No data.</span>`;
-  }
-  if (typeof data !== "object" || Array.isArray(data)) {
+  if (typeof data !== "object" || Array.isArray(data))
     return `<span class="kv-val">${formatVal(data)}</span>`;
-  }
   const rows = Object.entries(data).map(([k, v]) =>
-    `<div class="kv-row">
-      <div class="kv-key">${k}</div>
-      <div class="kv-val">${formatVal(v)}</div>
-    </div>`
+    `<div class="kv-row"><div class="kv-key">${k}</div><div class="kv-val">${formatVal(v)}</div></div>`
   ).join("");
   return `<div class="kv-table">${rows}</div>`;
 }
@@ -189,24 +190,26 @@ function renderKV(data) {
 function formatVal(v) {
   if (v === null || v === undefined || v === "") return `<span style="color:var(--muted)">—</span>`;
   if (Array.isArray(v)) {
-    if (v.length === 0) return `<span style="color:var(--muted)">—</span>`;
+    if (!v.length) return `<span style="color:var(--muted)">—</span>`;
+    if (typeof v[0] === "object") return `<pre style="font-size:10px;color:var(--muted)">${JSON.stringify(v,null,2)}</pre>`;
     return v.map(x => `<span class="tag">${x}</span>`).join(" ");
   }
   if (typeof v === "object") return `<pre style="font-size:10px;color:var(--muted)">${JSON.stringify(v,null,2)}</pre>`;
   const s = String(v);
   if (s.startsWith("http")) return `<a href="${s}" target="_blank">${s}</a>`;
+  if (v === true)  return `<span style="color:var(--green)">&#10003; true</span>`;
+  if (v === false) return `<span style="color:var(--muted)">&#10007; false</span>`;
   return s;
 }
 
 function renderUsernameTable(data) {
   if (!data || !data.length) return `<span style="color:var(--muted)">No data.</span>`;
-  const sorted = [...data].sort((a,b) => (b.found?1:0) - (a.found?1:0) || (a.name||"").localeCompare(b.name||""));
+  const sorted = [...data].sort((a,b) => (b.found?1:0)-(a.found?1:0) || (a.name||"").localeCompare(b.name||""));
   const rows = sorted.map(r => {
-    const found = r.found;
-    const pill = found
+    const pill = r.found
       ? `<span class="pill-found">FOUND</span>`
       : `<span class="pill-notfound">—</span>`;
-    const link = found
+    const link = r.found
       ? `<a href="${r.url}" target="_blank">${r.url}</a>`
       : `<span style="color:var(--muted)">${r.url||""}</span>`;
     return `<tr><td>${r.name||""}</td><td>${pill}</td><td>${link}</td></tr>`;
@@ -217,11 +220,9 @@ function renderUsernameTable(data) {
   </table>`;
 }
 
-function renderBreachTable(data) {
-  if (!data) return `<span style="color:var(--muted)">No data.</span>`;
-  const breaches = data.breaches || [];
-  if (!breaches.length) return `<span style="color:var(--green)">&#10003; No breaches found.</span>`;
-  const rows = breaches.map(b =>
+function renderBreachList(data) {
+  if (!data || !data.length) return `<span style="color:var(--green)">&#10003; No breaches found.</span>`;
+  const rows = data.map(b =>
     `<tr>
       <td><span class="breach-name">${b.Name||""}</span></td>
       <td>${b.BreachDate||""}</td>
@@ -235,6 +236,43 @@ function renderBreachTable(data) {
   </table>`;
 }
 
+function renderPasteList(data) {
+  if (!data || !data.length) return `<span style="color:var(--green)">&#10003; No pastes found.</span>`;
+  const rows = data.map(p =>
+    `<tr>
+      <td><span class="breach-name">${p.Source||""}</span></td>
+      <td>${p.Date||"unknown"}</td>
+      <td>${p.Title||"n/a"}</td>
+    </tr>`
+  ).join("");
+  return `<table class="breach-table">
+    <tr><th>Source</th><th>Date</th><th>Title</th></tr>
+    ${rows}
+  </table>`;
+}
+
+// Backward compat for old cache format {breaches: [...], pastes: [...]}
+function renderBreachCompat(data) {
+  if (!data) return `<span style="color:var(--muted)">No data.</span>`;
+  if (Array.isArray(data)) return renderBreachList(data);
+  let html = "";
+  if (data.breaches) html += `<div style="margin-bottom:8px">${renderBreachList(data.breaches)}</div>`;
+  if (data.pastes)   html += renderPasteList(data.pastes);
+  return html || `<span style="color:var(--muted)">No data.</span>`;
+}
+
+function renderGravatar(data) {
+  if (!data) return `<span style="color:var(--muted)">No data.</span>`;
+  if (!data.found) return `<span style="color:var(--muted)">No Gravatar found.</span>`;
+  return `<div style="display:flex;align-items:center;gap:12px">
+    <img src="${data.avatar_url}" style="width:64px;height:64px;border-radius:50%;border:2px solid var(--border)"/>
+    <div>
+      <div class="kv-row"><div class="kv-key">hash</div><div class="kv-val">${data.hash}</div></div>
+      <div class="kv-row"><div class="kv-key">profile</div><div class="kv-val"><a href="${data.profile_url}" target="_blank">${data.profile_url}</a></div></div>
+    </div>
+  </div>`;
+}
+
 function renderPerson(data) {
   if (!data) return `<span style="color:var(--muted)">No data.</span>`;
   let html = "";
@@ -243,11 +281,20 @@ function renderPerson(data) {
       const links = Object.entries(v).map(([label, url]) =>
         `<a class="dork-link" href="${url}" target="_blank">&#128279; ${label}</a>`
       ).join("");
-      html += `<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Search Dorks</div>${links}</div>`;
+      html += `<div style="margin-bottom:12px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Search Dorks</div>
+        ${links}
+      </div>`;
     } else if (k === "username_variants" && Array.isArray(v)) {
-      html += `<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Username Variants</div>${v.map(x=>`<span class="tag">${x}</span>`).join(" ")}</div>`;
+      html += `<div style="margin-bottom:12px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Username Variants</div>
+        ${v.map(x=>`<span class="tag">${x}</span>`).join(" ")}
+      </div>`;
     } else if (k === "gravatar_found" && Array.isArray(v) && v.length) {
-      html += `<div style="margin-bottom:12px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Gravatar</div>${v.map(x=>`<span class="tag found">${x}</span>`).join(" ")}</div>`;
+      html += `<div style="margin-bottom:12px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Gravatar Hits</div>
+        ${v.map(x=>`<span class="tag found">${x}</span>`).join(" ")}
+      </div>`;
     } else {
       html += `<div class="kv-row"><div class="kv-key">${k}</div><div class="kv-val">${formatVal(v)}</div></div>`;
     }
@@ -277,10 +324,8 @@ function renderHistory() {
 function replayScan(idx) {
   const h = history[idx];
   if (!h) return;
-  // Switch to the right tab
   const tab = document.querySelector(`.tab[data-tab="${h.module}"]`);
   if (tab) tab.click();
-  // Fill the first input
   const form = document.getElementById("form-" + h.module);
   if (form) {
     const input = form.querySelector("input[type=text], input[type=email]");
@@ -291,7 +336,7 @@ function replayScan(idx) {
 // ===== CACHE MODAL =====
 document.getElementById("cache-btn").addEventListener("click", async () => {
   document.getElementById("cache-modal").classList.remove("hidden");
-  const res = await fetch("/api/cache");
+  const res  = await fetch("/api/cache");
   const data = await res.json();
   document.getElementById("cache-stats-content").innerHTML = `
     <div class="kv-row"><div class="kv-key">Entries</div><div class="kv-val">${data.entries || 0}</div></div>
@@ -305,5 +350,6 @@ document.getElementById("cache-close-btn").addEventListener("click", () => {
 
 document.getElementById("cache-clear-btn").addEventListener("click", async () => {
   await fetch("/api/cache", { method: "DELETE" });
-  document.getElementById("cache-stats-content").innerHTML = `<span style="color:var(--green)">Cache cleared.</span>`;
+  document.getElementById("cache-stats-content").innerHTML =
+    `<span style="color:var(--green)">Cache cleared.</span>`;
 });

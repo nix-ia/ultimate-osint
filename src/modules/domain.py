@@ -328,10 +328,220 @@ def lookup_ip_geo(ip_or_domain: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# HackerTarget — free, 100/day, no key
+# ---------------------------------------------------------------------------
+
+def lookup_hackertarget(domain: str) -> dict[str, Any]:
+    print_section("HackerTarget (DNS history + reverse IP)", "yellow")
+    dns_r = _get(f"https://api.hackertarget.com/dnslookup/?q={domain}")
+    # Resolve to IP for reverse lookup
+    ip = ""
+    try:
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = ["8.8.8.8"]
+        answers = resolver.resolve(domain, "A", lifetime=8)
+        ip = str(answers[0])
+    except Exception:
+        pass
+
+    hosted: list[str] = []
+    if ip:
+        rev_r = _get(f"https://api.hackertarget.com/reverseiplookup/?q={ip}")
+        if rev_r and "error" not in rev_r.text.lower():
+            hosted = [l.strip() for l in rev_r.text.strip().splitlines() if l.strip()]
+
+    dns_lines: list[str] = []
+    if dns_r and "error" not in dns_r.text.lower():
+        dns_lines = [l.strip() for l in dns_r.text.strip().splitlines() if l.strip()]
+
+    print_result("resolved IP",     ip)
+    print_result("co-hosted domains", hosted[:15])
+    print_result("dns records",     dns_lines[:15])
+    return {"ip": ip, "hosted_domains": hosted, "dns_records": dns_lines}
+
+
+# ---------------------------------------------------------------------------
+# ThreatFox — abuse.ch, free, no key
+# ---------------------------------------------------------------------------
+
+def lookup_threatfox(domain: str) -> dict[str, Any]:
+    print_section("ThreatFox (IOC database)", "yellow")
+    try:
+        r = requests.post(
+            "https://threatfox-api.abuse.ch/api/v1/",
+            json={"query": "search_ioc", "search_term": domain},
+            headers=config.HEADERS,
+            timeout=config.TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("query_status") == "no_result":
+            console.print("  [dim green]Not found in ThreatFox.[/dim green]")
+            return {"found": False}
+        iocs = data.get("data", [])
+        console.print(f"  [bold red]Found {len(iocs)} IOC(s)![/bold red]")
+        result = []
+        for ioc in iocs[:5]:
+            entry = {
+                "ioc":         ioc.get("ioc_value"),
+                "threat_type": ioc.get("threat_type"),
+                "malware":     ioc.get("malware"),
+                "confidence":  ioc.get("confidence_level"),
+                "first_seen":  ioc.get("first_seen"),
+            }
+            result.append(entry)
+            print_result(ioc.get("ioc_value"), f"{ioc.get('threat_type')} / {ioc.get('malware')}")
+        return {"found": True, "iocs": result}
+    except Exception as e:
+        console.print(f"  [red]ThreatFox error: {e}[/red]")
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# URLHaus — abuse.ch, free, no key
+# ---------------------------------------------------------------------------
+
+def lookup_urlhaus(domain: str) -> dict[str, Any]:
+    print_section("URLHaus (malware URL database)", "yellow")
+    try:
+        r = requests.post(
+            "https://urlhaus-api.abuse.ch/v1/host/",
+            data={"host": domain},
+            headers=config.HEADERS,
+            timeout=config.TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if data.get("query_status") == "no_results":
+            console.print("  [dim green]Not found in URLHaus.[/dim green]")
+            return {"found": False}
+        urls = data.get("urls", [])
+        console.print(f"  [bold red]Found {len(urls)} malicious URL(s)![/bold red]")
+        result = [
+            {
+                "url":        u.get("url"),
+                "status":     u.get("url_status"),
+                "threat":     u.get("threat"),
+                "date_added": u.get("date_added"),
+            }
+            for u in urls[:5]
+        ]
+        for u in result:
+            print_result(u["url"], u["threat"])
+        return {"found": True, "total": len(urls), "urls": result}
+    except Exception as e:
+        console.print(f"  [red]URLHaus error: {e}[/red]")
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# AlienVault OTX — free key (register at otx.alienvault.com)
+# ---------------------------------------------------------------------------
+
+def lookup_alienvault(domain: str) -> dict[str, Any]:
+    print_section("AlienVault OTX (threat intel)", "yellow")
+    if not config.ALIENVAULT_API_KEY:
+        console.print("  [dim]ALIENVAULT_API_KEY not set — skipping.[/dim]")
+        return {}
+    r = _get(
+        f"https://otx.alienvault.com/api/v1/indicators/domain/{domain}/general",
+        headers={**config.HEADERS, "X-OTX-API-KEY": config.ALIENVAULT_API_KEY},
+    )
+    if not r:
+        return {}
+    try:
+        data = r.json()
+        pulse_info = data.get("pulse_info", {})
+        pulses     = pulse_info.get("pulses", [])
+        tags: list[str] = []
+        for p in pulses[:10]:
+            tags.extend(p.get("tags", []))
+        tags = sorted(set(tags))
+        print_result("pulse count", pulse_info.get("count", 0))
+        print_result("reputation",  data.get("reputation", 0))
+        print_result("alexa rank",  data.get("alexa"))
+        print_result("tags",        tags[:10])
+        return {
+            "pulse_count": pulse_info.get("count", 0),
+            "reputation":  data.get("reputation", 0),
+            "tags":        tags,
+            "pulses":      [{"name": p.get("name"), "created": p.get("created")} for p in pulses[:5]],
+        }
+    except Exception as e:
+        console.print(f"  [red]AlienVault parse error: {e}[/red]")
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# SecurityTrails — free key, 50 queries/month
+# ---------------------------------------------------------------------------
+
+def lookup_securitytrails(domain: str) -> dict[str, Any]:
+    print_section("SecurityTrails (DNS history)", "yellow")
+    if not config.SECURITYTRAILS_API_KEY:
+        console.print("  [dim]SECURITYTRAILS_API_KEY not set — skipping.[/dim]")
+        return {}
+    r = _get(
+        f"https://api.securitytrails.com/v1/domain/{domain}",
+        headers={**config.HEADERS, "APIKEY": config.SECURITYTRAILS_API_KEY},
+    )
+    if not r:
+        return {}
+    try:
+        data = r.json()
+        current = data.get("current_dns", {})
+        print_result("hostname",      data.get("hostname"))
+        print_result("apex_domain",   data.get("apex_domain"))
+        print_result("A records",     [v.get("ip")    for v in current.get("a",  {}).get("values", [])])
+        print_result("MX records",    [v.get("value") for v in current.get("mx", {}).get("values", [])])
+        print_result("NS records",    [v.get("value") for v in current.get("ns", {}).get("values", [])])
+        print_result("subdomain count", data.get("subdomain_count", 0))
+        return data
+    except Exception as e:
+        console.print(f"  [red]SecurityTrails parse error: {e}[/red]")
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Censys — free key, 250 queries/month (register at censys.io)
+# ---------------------------------------------------------------------------
+
+def lookup_censys(domain: str) -> dict[str, Any]:
+    print_section("Censys (internet scan)", "yellow")
+    if not config.CENSYS_API_ID or not config.CENSYS_API_SECRET:
+        console.print("  [dim]CENSYS_API_ID/SECRET not set — skipping.[/dim]")
+        return {}
+    r = _get(
+        "https://search.censys.io/api/v2/hosts/search",
+        params={"q": f"dns.names: {domain}", "per_page": 5},
+        auth=(config.CENSYS_API_ID, config.CENSYS_API_SECRET),
+    )
+    if not r:
+        return {}
+    try:
+        hits = r.json().get("result", {}).get("hits", [])
+        result = []
+        for h in hits:
+            entry = {
+                "ip":       h.get("ip"),
+                "services": [f"{s.get('port')}/{s.get('transport_protocol','tcp')}" for s in h.get("services", [])],
+                "labels":   h.get("labels", []),
+            }
+            result.append(entry)
+            print_result(h.get("ip"), entry["services"])
+        total = r.json().get("result", {}).get("total", 0)
+        print_result("total hosts", total)
+        return {"total": total, "hosts": result}
+    except Exception as e:
+        console.print(f"  [red]Censys parse error: {e}[/red]")
+        return {}
+
+
+# ---------------------------------------------------------------------------
 # Full domain scan orchestrator
 # ---------------------------------------------------------------------------
 
-def scan_domain(target: str, use_cache: bool = True) -> dict[str, Any]:
+def scan_domain(target: str, tools: set[str] | None = None, use_cache: bool = True) -> dict[str, Any]:
     from .cache import get_cache
     domain = extract_domain(target)
     console.print(f"\n[bold white]Target:[/bold white] [bold green]{domain}[/bold green]")
@@ -352,16 +562,29 @@ def scan_domain(target: str, use_cache: bool = True) -> dict[str, Any]:
                     print_result("results", data)
             return cached
 
+    steps = [
+        ("whois",          lambda d: lookup_whois(d)),
+        ("dns",            lambda d: lookup_dns(d)),
+        ("crtsh",          lambda d: {"subdomains": lookup_crtsh(d)}),
+        ("wayback",        lambda d: lookup_wayback(d)),
+        ("ip_geo",         lambda d: lookup_ip_geo(d)),
+        ("hackertarget",   lambda d: lookup_hackertarget(d)),
+        ("urlscan",        lambda d: {"results": [r.get("page", {}).get("url") for r in lookup_urlscan(d)]}),
+        ("threatfox",      lambda d: lookup_threatfox(d)),
+        ("urlhaus",        lambda d: lookup_urlhaus(d)),
+        ("alienvault",     lambda d: lookup_alienvault(d)),
+        ("virustotal",     lambda d: lookup_virustotal(d)),
+        ("censys",         lambda d: lookup_censys(d)),
+        ("securitytrails", lambda d: lookup_securitytrails(d)),
+        ("shodan",         lambda d: lookup_shodan(d)),
+        ("hunter",         lambda d: {"emails": lookup_hunter(d)}),
+    ]
+
     result: dict[str, Any] = {}
-    result["whois"]     = lookup_whois(domain)
-    result["dns"]       = lookup_dns(domain)
-    result["crtsh"]     = {"subdomains": lookup_crtsh(domain)}
-    result["wayback"]   = lookup_wayback(domain)
-    result["ip_geo"]    = lookup_ip_geo(domain)
-    result["shodan"]    = lookup_shodan(domain)
-    result["virustotal"]= lookup_virustotal(domain)
-    result["hunter"]    = {"emails": lookup_hunter(domain)}
-    result["urlscan"]   = {"results": [r.get("page", {}).get("url") for r in lookup_urlscan(domain)]}
+    for name, fn in steps:
+        if tools and name not in tools:
+            continue
+        result[name] = fn(domain)
 
     if use_cache:
         cache.set("domain", domain, result)

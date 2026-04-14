@@ -371,6 +371,49 @@ a:hover { text-decoration: underline; }
 }
 .dork-link:last-child { border-bottom: none; }
 
+/* Tools section */
+.tools-section {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.tools-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 10px;
+  background: var(--bg3);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  user-select: none;
+  transition: color 0.1s;
+}
+.tools-header:hover { color: var(--text); }
+.tools-arrow { font-size: 8px; }
+.tools-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.tool-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+}
+.tool-label:hover { color: var(--text); }
+.tool-label input[type=checkbox] { cursor: pointer; accent-color: var(--blue); }
+
 /* Skeleton loader */
 .skeleton {
   background: linear-gradient(90deg, var(--bg3) 25%, var(--border) 50%, var(--bg3) 75%);
